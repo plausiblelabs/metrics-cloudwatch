@@ -16,7 +16,7 @@ public class CloudWatchReporterTest {
         URL props = Resources.getResource("aws_creds.properties");
         InputStream is = Resources.newInputStreamSupplier(props).getInput();
         AWSCredentials creds = new PropertiesCredentials(is);
-        CloudWatchReporter reporter = new CloudWatchReporter(Metrics.defaultRegistry(), "cxabf", creds);
+        CloudWatchReporter reporter = new CloudWatchReporter(Metrics.defaultRegistry(), "cxabf", creds, /*sendInstanceId=*/false);
         reporter.run();
     }
 }
