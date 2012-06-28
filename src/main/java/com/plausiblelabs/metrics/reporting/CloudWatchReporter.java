@@ -1,11 +1,25 @@
 package com.plausiblelabs.metrics.reporting;
 
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatchClient;
 import com.amazonaws.services.cloudwatch.model.Dimension;
 import com.amazonaws.services.cloudwatch.model.MetricDatum;
 import com.amazonaws.services.cloudwatch.model.PutMetricDataRequest;
 import com.amazonaws.services.cloudwatch.model.StandardUnit;
+import com.yammer.metrics.Metrics;
 import com.yammer.metrics.core.Counter;
 import com.yammer.metrics.core.Gauge;
 import com.yammer.metrics.core.Histogram;
@@ -20,28 +34,86 @@ import com.yammer.metrics.core.VirtualMachineMetrics;
 import com.yammer.metrics.reporting.AbstractPollingReporter;
 import com.yammer.metrics.stats.Snapshot;
 
-import org.apache.http.HttpResponse;
-import org.apache.http.HttpStatus;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.SortedMap;
-import java.util.concurrent.TimeUnit;
-
 public class CloudWatchReporter extends AbstractPollingReporter implements MetricProcessor<Date> {
     private static final Logger LOG = LoggerFactory.getLogger(CloudWatchReporter.class);
+
+    public static class Enabler {
+        private final String namespace;
+        private final AmazonCloudWatchClient client;
+        private final List<DimensionAdder> dimensionAdders = new ArrayList<DimensionAdder>();
+
+        private MetricsRegistry registry = Metrics.defaultRegistry();
+        private MetricPredicate predicate = MetricPredicate.ALL;
+
+        private long period = 1;
+        private TimeUnit unit = TimeUnit.MINUTES;
+
+        private boolean sendToCloudWatch = true;
+
+        public Enabler(String namespace, AWSCredentials creds) {
+            this(namespace, new AmazonCloudWatchClient(creds));
+        }
+
+        public Enabler(String namespace, AmazonCloudWatchClient client) {
+            this.namespace = namespace;
+            this.client = client;
+        }
+
+        public Enabler withRegistry(MetricsRegistry registry) {
+            this.registry = registry;
+            return this;
+        }
+
+        public Enabler withPredicate(MetricPredicate predicate) {
+            this.predicate = predicate;
+            return this;
+        }
+
+        public Enabler withDelay(long period, TimeUnit unit) {
+            this.period = period;
+            this.unit = unit;
+            return this;
+        }
+
+        public Enabler withEC2InstanceIdDimension() {
+            return withEC2InstanceIdDimension(MetricPredicate.ALL);
+        }
+
+        public Enabler withEC2InstanceIdDimension(MetricPredicate predicate) {
+            return withDimensionAdder(new InstanceIdAdder(predicate));
+        }
+
+        public Enabler withInstanceIdDimension(String instanceId) {
+            return withInstanceIdDimension(instanceId, MetricPredicate.ALL);
+        }
+
+        public Enabler withInstanceIdDimension(String instanceId, MetricPredicate predicate) {
+            return withDimensionAdder(new InstanceIdAdder(predicate, instanceId));
+        }
+
+        public Enabler withDimensionAdder(DimensionAdder adder) {
+            this.dimensionAdders.add(adder);
+            return this;
+        }
+
+        public Enabler withCloudWatchEnabled(boolean enabled) {
+            sendToCloudWatch = enabled;
+            return this;
+        }
+
+
+        public CloudWatchReporter build() {
+            return new CloudWatchReporter(registry, namespace, client, predicate, dimensionAdders, sendToCloudWatch);
+        }
+
+        public void enable() {
+            try {
+                build().start(period, unit);
+            } catch (Exception e) {
+                LOG.error("Error creating/starting CloudWatch reporter:", e);
+            }
+        }
+    }
 
     /**
      * CloudWatch metrics are 50 cents per unique custom metric per month. Setting this to true excludes less valuable
@@ -50,53 +122,34 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     private static final boolean USE_FEW_CLOUD_WATCH_METRICS = true;
     
     private final VirtualMachineMetrics vm = VirtualMachineMetrics.getInstance();
-    private final List<Dimension> instanceDimensions = new ArrayList<Dimension>();
+    private final List<DimensionAdder> dimensionAdders;
     private final Set<MetricName> unsendable = new HashSet<MetricName>();
     private final Set<MetricName> nonCloudWatchUnit = new HashSet<MetricName>();
+    private final MetricPredicate predicate;
     private final String namespace;
     private final AmazonCloudWatchClient client;
-    private final MetricPredicate predicate;
-
-    private boolean attemptedFetchingInstanceId;
-    private String instanceId;
-
+    private final boolean sendToCloudWatch;
 
     private PutMetricDataRequest putReq;
 
-    public CloudWatchReporter(MetricsRegistry registry, String namespace, AWSCredentials creds, MetricPredicate predicate) {
+    private CloudWatchReporter(MetricsRegistry registry, String namespace, AmazonCloudWatchClient client, MetricPredicate predicate, List <DimensionAdder> dimensionAdders, boolean sendToCloudWatch) {
         super(registry, "cloudwatch-reporter");
         this.predicate = predicate;
 
         this.namespace = namespace;
-        client = new AmazonCloudWatchClient(creds);
-    }
-
-    /**
-     * Sets the InstanceId dimension sent along with the CloudWatch metrics. This will be found automatically if run
-     * on EC2. If run outside EC2, this must be called or no metrics will be sent.
-     */
-    public void setInstanceId(String instanceId) {
-        this.instanceId = instanceId;
-        instanceDimensions.add(new Dimension().withName("InstanceId").withValue(instanceId));
+        this.client = client;
+        this.dimensionAdders = dimensionAdders;
+        this.sendToCloudWatch = sendToCloudWatch;
     }
 
     @Override
     public void run() {
-        if (instanceId == null) {
-            fetchInstanceId();
-            if (instanceId == null) {
-                return;
-            }
-        }
-
         putReq = new PutMetricDataRequest().withNamespace(namespace);
         try {
             Date timestamp = new Date();
             sendVMMetrics(timestamp);
             sendRegularMetrics(timestamp);
-            if (!putReq.getMetricData().isEmpty()) {
-                client.putMetricData(putReq);
-            }
+            sendToCloudWatch();
         } catch (Exception e) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Error writing to CloudWatch", e);
@@ -108,33 +161,14 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         }
     }
 
-    private void fetchInstanceId() {
-        DefaultHttpClient httpClient = new DefaultHttpClient();
-        try {
-            HttpGet get = new HttpGet("http://169.254.169.254/latest/meta-data/instance-id");
-            HttpResponse resp = httpClient.execute(get);
-            if (resp.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
-                if (!attemptedFetchingInstanceId) {
-                    LOG.warn("Got bad response code {} fetching instanceId; will retry on next scheduled report. No metrics will be reported until it succeeds. If running outside EC2, call setInstanceId on the CloudWatchReporter.", resp.getStatusLine().getStatusCode());
-                }
-                return;
-            }
-            InputStream content = resp.getEntity().getContent();
-            setInstanceId(new BufferedReader(new InputStreamReader(content, "ASCII")).readLine());
-            if (attemptedFetchingInstanceId) {
-                LOG.warn("Succeeded fetching instanceId after failure; all new metrics will now be reported");
-            }
-        } catch (Exception e) {
-            if (!attemptedFetchingInstanceId) {
-                LOG.warn("Failed fetching instanceId; will retry on next scheduled report. No metrics will be reported until it succeeds. If running outside EC2, call setInstanceId on the CloudWatchReporter.", e);
-            }
-        } finally {
-            attemptedFetchingInstanceId = true;
-            httpClient.getConnectionManager().shutdown();
+    private void sendToCloudWatch() {
+        if (sendToCloudWatch && !putReq.getMetricData().isEmpty()) {
+            client.putMetricData(putReq);
         }
+        putReq = new PutMetricDataRequest().withNamespace(namespace);
     }
 
-    protected void sendRegularMetrics(Date timestamp) {
+    private void sendRegularMetrics(Date timestamp) {
         for (Map.Entry<String, SortedMap<MetricName, Metric>> entry : getMetricsRegistry().groupedMetrics(predicate).entrySet()) {
             for (Map.Entry<MetricName, Metric> subEntry : entry.getValue().entrySet()) {
                 final Metric metric = subEntry.getValue();
@@ -150,50 +184,63 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     }
 
 
-    protected void sendVMMetrics(Date timestamp) {
-        sendValue(timestamp, "jvm.memory.heap_usage", vm.heapUsage(), StandardUnit.Percent);
-        sendValue(timestamp, "jvm.thread_count", vm.threadCount(), StandardUnit.Count);
-        sendValue(timestamp, "jvm.fd_usage", vm.fileDescriptorUsage(), StandardUnit.Percent);
+    private void sendVMMetrics(Date timestamp) {
+        List<Dimension> dimensions = new ArrayList<Dimension>();
+        for (DimensionAdder adder : dimensionAdders) {
+            dimensions.addAll(adder.generateJVMDimensions());
+        }
+        sendValue(timestamp, "jvm.memory.heap_usage", vm.heapUsage(), StandardUnit.Percent, dimensions);
+        sendValue(timestamp, "jvm.thread_count", vm.threadCount(), StandardUnit.Count, dimensions);
+        sendValue(timestamp, "jvm.fd_usage", vm.fileDescriptorUsage(), StandardUnit.Percent, dimensions);
+        sendValue(timestamp, "jvm.memory.non_heap_usage", vm.nonHeapUsage(), StandardUnit.Percent, dimensions);
+        sendValue(timestamp, "jvm.daemon_thread_count", vm.daemonThreadCount(), StandardUnit.Count, dimensions);
 
         if (USE_FEW_CLOUD_WATCH_METRICS) {
             return;
         }
-        sendValue(timestamp, "jvm.memory.non_heap_usage", vm.nonHeapUsage(), StandardUnit.Percent);
-
-        sendValue(timestamp, "jvm.daemon_thread_count", vm.daemonThreadCount(), StandardUnit.Count);
 
         for (Map.Entry<Thread.State, Double> entry : vm.threadStatePercentages().entrySet()) {
-            sendValue(timestamp, "jvm.thread-states." + entry.getKey().toString().toLowerCase(), entry.getValue(), StandardUnit.Count);
+            sendValue(timestamp, "jvm.thread-states." + entry.getKey().toString().toLowerCase(), entry.getValue(), StandardUnit.Count, dimensions);
         }
 
         for (Map.Entry<String, VirtualMachineMetrics.GarbageCollectorStats> entry : vm.garbageCollectors().entrySet()) {
-            sendValue(timestamp, "jvm.gc." + entry.getKey() + ".time", entry.getValue().getTime(TimeUnit.MILLISECONDS), StandardUnit.Milliseconds);
-            sendValue(timestamp, "jvm.gc." + entry.getKey() + ".runs", entry.getValue().getRuns(), StandardUnit.Count);
+            sendValue(timestamp, "jvm.gc." + entry.getKey() + ".time", entry.getValue().getTime(TimeUnit.MILLISECONDS), StandardUnit.Milliseconds, dimensions);
+            sendValue(timestamp, "jvm.gc." + entry.getKey() + ".runs", entry.getValue().getRuns(), StandardUnit.Count, dimensions);
         }
     }
 
-    protected void sendValue(Date timestamp, String name, double value, StandardUnit unit, Dimension...additionalDimensions) {
+    private List<Dimension> createDimensions(MetricName name, Metric metric) {
+        List<Dimension> dimensions = new ArrayList<Dimension>();
+        for (DimensionAdder adder : dimensionAdders) {
+            dimensions.addAll(adder.generate(name, metric));
+        }
+        return dimensions;
+    }
+
+    private void sendValue(Date timestamp, String name, double value, StandardUnit unit, List<Dimension> dimensions) {
         MetricDatum datum = new MetricDatum()
             .withTimestamp(timestamp)
             .withValue(value)
             .withMetricName(name)
-            .withDimensions(instanceDimensions)
-            .withDimensions(additionalDimensions)
+            .withDimensions(dimensions)
             .withUnit(unit);
 
-        if (LOG.isDebugEnabled()) {
+
+
+        if (!sendToCloudWatch) {
+            LOG.info("Not sending {}", datum);
+        } else if (LOG.isDebugEnabled()) {
             LOG.debug("Sending {}", datum);
         }
         putReq.withMetricData(datum);
 
         // Can only send 20 metrics at a time
         if (putReq.getMetricData().size() == 20) {
-            client.putMetricData(putReq);
-            putReq = new PutMetricDataRequest().withNamespace(namespace);
+            sendToCloudWatch();
         }
     }
 
-    protected String sanitizeName(MetricName name) {
+    private String sanitizeName(MetricName name) {
         // TODO - collapse package names if the name is over 255 characters
         final StringBuilder sb = new StringBuilder()
             .append(name.getGroup())
@@ -210,7 +257,7 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     @Override
     public void processGauge(MetricName name, Gauge<?> gauge, Date context) throws Exception {
         if (gauge.value() instanceof Number) {
-            sendValue(context, sanitizeName(name), ((Number) gauge.value()).doubleValue(), StandardUnit.None);
+            sendValue(context, sanitizeName(name), ((Number) gauge.value()).doubleValue(), StandardUnit.None, createDimensions(name, gauge));
         } else if(unsendable.add(name)) {
             LOG.warn("The type of the value for {} is {}. It must be a subclass of Number to send to CloudWatch.", name, gauge.value().getClass());
         }
@@ -218,44 +265,46 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
 
     @Override
     public void processCounter(MetricName name, Counter counter, Date context) throws Exception {
-        sendValue(context, sanitizeName(name), counter.count(), StandardUnit.Count);
+        sendValue(context, sanitizeName(name), counter.count(), StandardUnit.Count, createDimensions(name, counter));
     }
 
 
     @Override
     public void processMeter(MetricName name, Metered meter, Date context) throws Exception {
+        List<Dimension> dimensions = createDimensions(name, meter);
         String sanitizedName = sanitizeName(name);
         String rateUnits = meter.rateUnit().name();
         String rateUnit = rateUnits.substring(0, rateUnits.length() - 1).toLowerCase(Locale.US);
-        // CloudWatch only supports its standard units, so this rate won't line up. Instead send the unit as a dimension and call the unit Counts.
-        Dimension unit = new Dimension().withName("meterUnit").withValue(meter.eventType() + '/' + rateUnit);
-        sendValue(context, sanitizedName + ".1MinuteRate", meter.oneMinuteRate(), StandardUnit.None, unit);
+        // CloudWatch only supports its standard units, so this rate won't line up. Instead send the unit as a dimension and call the unit None.
+        dimensions.add(new Dimension().withName("meterUnit").withValue(meter.eventType() + '/' + rateUnit));
+        sendValue(context, sanitizedName + ".1MinuteRate", meter.oneMinuteRate(), StandardUnit.None, dimensions);
         if (USE_FEW_CLOUD_WATCH_METRICS) {
             return;
         }
-        sendValue(context, sanitizedName + ".count", meter.count(), StandardUnit.None, unit);
-        sendValue(context, sanitizedName + ".meanRate", meter.meanRate(), StandardUnit.None, unit);
-        sendValue(context, sanitizedName + ".5MinuteRate", meter.fiveMinuteRate(), StandardUnit.None, unit);
-        sendValue(context, sanitizedName + ".15MinuteRate", meter.fifteenMinuteRate(), StandardUnit.None, unit);
+        sendValue(context, sanitizedName + ".count", meter.count(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".meanRate", meter.meanRate(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".5MinuteRate", meter.fiveMinuteRate(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".15MinuteRate", meter.fifteenMinuteRate(), StandardUnit.None, dimensions);
     }
 
     @Override
     public void processHistogram(MetricName name, Histogram histogram, Date context) throws Exception {
+        List<Dimension> dimensions = createDimensions(name, histogram);
         String sanitizedName = sanitizeName(name);
         Snapshot snapshot = histogram.getSnapshot();
-        sendValue(context, sanitizedName + ".median", snapshot.getMedian(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".95percentile", snapshot.get95thPercentile(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".99percentile", snapshot.get99thPercentile(), StandardUnit.None);
+        sendValue(context, sanitizedName + ".median", snapshot.getMedian(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".95percentile", snapshot.get95thPercentile(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".99percentile", snapshot.get99thPercentile(), StandardUnit.None, dimensions);
         if (USE_FEW_CLOUD_WATCH_METRICS) {
             return;
         }
-        sendValue(context, sanitizedName + ".75percentile", snapshot.get75thPercentile(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".98percentile", snapshot.get98thPercentile(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".999percentile", snapshot.get999thPercentile(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".min", histogram.min(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".max", histogram.max(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".mean", histogram.mean(), StandardUnit.None);
-        sendValue(context, sanitizedName + ".stddev", histogram.stdDev(), StandardUnit.None);
+        sendValue(context, sanitizedName + ".75percentile", snapshot.get75thPercentile(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".98percentile", snapshot.get98thPercentile(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".999percentile", snapshot.get999thPercentile(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".min", histogram.min(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".max", histogram.max(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".mean", histogram.mean(), StandardUnit.None, dimensions);
+        sendValue(context, sanitizedName + ".stddev", histogram.stdDev(), StandardUnit.None, dimensions);
     }
 
     @Override
@@ -302,21 +351,23 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
 
 
         processMeter(name, timer, context);
+
+        List<Dimension> dimensions = createDimensions(name, timer);
         String sanitizedName = sanitizeName(name);
         Snapshot snapshot = timer.getSnapshot();
-        sendValue(context, sanitizedName + ".median", convertIfNecessary(snapshot.getMedian(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".95percentile", convertIfNecessary(snapshot.get95thPercentile(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".99percentile", convertIfNecessary(snapshot.get99thPercentile(), recordedUnit, sendUnit), cloudWatchUnit);
+        sendValue(context, sanitizedName + ".median", convertIfNecessary(snapshot.getMedian(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".95percentile", convertIfNecessary(snapshot.get95thPercentile(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".99percentile", convertIfNecessary(snapshot.get99thPercentile(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
         if (USE_FEW_CLOUD_WATCH_METRICS) {
             return;
         }
-        sendValue(context, sanitizedName + ".min", convertIfNecessary(timer.min(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".max", convertIfNecessary(timer.max(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".mean", convertIfNecessary(timer.mean(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".stddev", convertIfNecessary(timer.stdDev(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".75percentile", convertIfNecessary(snapshot.get75thPercentile(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".98percentile", convertIfNecessary(snapshot.get98thPercentile(), recordedUnit, sendUnit), cloudWatchUnit);
-        sendValue(context, sanitizedName + ".999percentile", convertIfNecessary(snapshot.get999thPercentile(), recordedUnit, sendUnit), cloudWatchUnit);
+        sendValue(context, sanitizedName + ".min", convertIfNecessary(timer.min(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".max", convertIfNecessary(timer.max(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".mean", convertIfNecessary(timer.mean(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".stddev", convertIfNecessary(timer.stdDev(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".75percentile", convertIfNecessary(snapshot.get75thPercentile(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".98percentile", convertIfNecessary(snapshot.get98thPercentile(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+        sendValue(context, sanitizedName + ".999percentile", convertIfNecessary(snapshot.get999thPercentile(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
     }
 
     /** If recordedUnit doesn't match sendUnit, converts recordedUnit into sendUnit. Otherwise, value is returned unchanged. */
