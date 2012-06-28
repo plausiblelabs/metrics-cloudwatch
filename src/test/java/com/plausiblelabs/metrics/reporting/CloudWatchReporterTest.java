@@ -22,6 +22,10 @@ public class CloudWatchReporterTest {
         CloudWatchReporter reporter = new CloudWatchReporter.Enabler("cxabf", creds)
             .withInstanceIdDimension("test")
             .withCloudWatchEnabled(false)
+            .withGC(true)
+            .withFiveMinuteRate(true)
+            .withOneMinuteRate(false)
+            .withPercentiles(.1, .5, .9, .999)
             .build();
         Timer timer = Metrics.newTimer(CloudWatchReporterTest.class, "TestTimer", TimeUnit.MINUTES, TimeUnit.MINUTES);
         for (int i = 0; i < 100; i++) {
