@@ -55,8 +55,8 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         private boolean sendMeterSummary;
         private boolean sendTimerLifetime;
         private boolean sendHistoLifetime;
-        private boolean sendJVMBasics = true;
-        private boolean sendJVMThreadStates;
+        private boolean sendJVMMemory = true;
+        private boolean sendJVMThreadState;
         private boolean sendGC;
 
         public Enabler withPercentiles(double...percentiles) {
@@ -94,13 +94,13 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
             return this;
         }
 
-        public Enabler withJVMBasics(boolean enabled) {
-            this.sendJVMBasics = enabled;
+        public Enabler withJVMMemory(boolean enabled) {
+            this.sendJVMMemory = enabled;
             return this;
         }
 
-        public Enabler withJVMThreadStates(boolean enabled) {
-            this.sendJVMThreadStates = enabled;
+        public Enabler withJVMThreadState(boolean enabled) {
+            this.sendJVMThreadState = enabled;
             return this;
         }
 
@@ -165,7 +165,7 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
             return new CloudWatchReporter(registry, namespace, client, predicate, dimensionAdders,
                                           sendToCloudWatch, percentilesToSend, sendOneMinute, sendFiveMinute,
                                           sendFifteenMinute, sendMeterSummary, sendTimerLifetime, sendHistoLifetime,
-                                          sendJVMBasics, sendJVMThreadStates, sendGC);
+                                          sendJVMMemory, sendJVMThreadState, sendGC);
         }
 
         public void enable() {
@@ -191,8 +191,8 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     private final boolean sendMeterSummary;
     private final boolean sendTimerLifetime;
     private final boolean sendHistoLifetime;
-    private final boolean sendJVMBasics;
-    private final boolean sendJVMThreadStates;
+    private final boolean sendJVMMemory;
+    private final boolean sendJVMThreads;
     private final boolean sendJVMGC;
 
     private PutMetricDataRequest putReq;
@@ -201,8 +201,8 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
                                MetricPredicate predicate, List<DimensionAdder> dimensionAdders,
                                boolean sendToCloudWatch, double[] percentilesToSend, boolean sendOneMinute,
                                boolean sendFiveMinute, boolean sendFifteenMinute, boolean sendMeterSummary,
-                               boolean sendTimerLifetime, boolean sendHistoLifetime, boolean sendJVMBasics,
-                               boolean sendJVMThreadStates, boolean sendJVMGC) {
+                               boolean sendTimerLifetime, boolean sendHistoLifetime, boolean sendJVMMemory,
+                               boolean sendJVMThreads, boolean sendJVMGC) {
         super(registry, "cloudwatch-reporter");
         this.predicate = predicate;
 
@@ -218,8 +218,8 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         this.sendMeterSummary = sendMeterSummary;
         this.sendTimerLifetime = sendTimerLifetime;
         this.sendHistoLifetime = sendHistoLifetime;
-        this.sendJVMBasics = sendJVMBasics;
-        this.sendJVMThreadStates = sendJVMThreadStates;
+        this.sendJVMMemory = sendJVMMemory;
+        this.sendJVMThreads = sendJVMThreads;
         this.sendJVMGC = sendJVMGC;
     }
 
@@ -249,57 +249,6 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         putReq = new PutMetricDataRequest().withNamespace(namespace);
     }
 
-    private void sendRegularMetrics(Date timestamp) {
-        for (Map.Entry<String, SortedMap<MetricName, Metric>> entry : getMetricsRegistry().groupedMetrics(predicate).entrySet()) {
-            for (Map.Entry<MetricName, Metric> subEntry : entry.getValue().entrySet()) {
-                final Metric metric = subEntry.getValue();
-                if (metric != null) {
-                    try {
-                        metric.processWith(this, subEntry.getKey(), timestamp);
-                    } catch (Exception ignored) {
-                        LOG.error("Error printing regular metrics:", ignored);
-                    }
-                }
-            }
-        }
-    }
-
-
-    private void sendVMMetrics(Date timestamp) {
-        List<Dimension> dimensions = new ArrayList<Dimension>();
-        for (DimensionAdder adder : dimensionAdders) {
-            dimensions.addAll(adder.generateJVMDimensions());
-        }
-        if (sendJVMBasics) {
-            sendValue(timestamp, "jvm.memory.heap_usage", vm.heapUsage(), StandardUnit.Percent, dimensions);
-            sendValue(timestamp, "jvm.thread_count", vm.threadCount(), StandardUnit.Count, dimensions);
-            sendValue(timestamp, "jvm.fd_usage", vm.fileDescriptorUsage(), StandardUnit.Percent, dimensions);
-            sendValue(timestamp, "jvm.memory.non_heap_usage", vm.nonHeapUsage(), StandardUnit.Percent, dimensions);
-            sendValue(timestamp, "jvm.daemon_thread_count", vm.daemonThreadCount(), StandardUnit.Count, dimensions);
-        }
-
-        if (sendJVMThreadStates) {
-            for (Map.Entry<Thread.State, Double> entry : vm.threadStatePercentages().entrySet()) {
-                sendValue(timestamp, "jvm.thread-states." + entry.getKey().toString().toLowerCase(), entry.getValue(), StandardUnit.Count, dimensions);
-            }
-        }
-
-        if (sendJVMGC) {
-            for (Map.Entry<String, VirtualMachineMetrics.GarbageCollectorStats> entry : vm.garbageCollectors().entrySet()) {
-                sendValue(timestamp, "jvm.gc." + entry.getKey() + ".time", entry.getValue().getTime(TimeUnit.MILLISECONDS), StandardUnit.Milliseconds, dimensions);
-                sendValue(timestamp, "jvm.gc." + entry.getKey() + ".runs", entry.getValue().getRuns(), StandardUnit.Count, dimensions);
-            }
-        }
-    }
-
-    private List<Dimension> createDimensions(MetricName name, Metric metric) {
-        List<Dimension> dimensions = new ArrayList<Dimension>();
-        for (DimensionAdder adder : dimensionAdders) {
-            dimensions.addAll(adder.generate(name, metric));
-        }
-        return dimensions;
-    }
-
     private void sendValue(Date timestamp, String name, double value, StandardUnit unit, List<Dimension> dimensions) {
         // TODO limit to 10 dimensions
         MetricDatum datum = new MetricDatum()
@@ -322,6 +271,56 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         if (putReq.getMetricData().size() == 20) {
             sendToCloudWatch();
         }
+    }
+
+    private void sendRegularMetrics(Date timestamp) {
+        for (Map.Entry<String, SortedMap<MetricName, Metric>> entry : getMetricsRegistry().groupedMetrics(predicate).entrySet()) {
+            for (Map.Entry<MetricName, Metric> subEntry : entry.getValue().entrySet()) {
+                final Metric metric = subEntry.getValue();
+                if (metric != null) {
+                    try {
+                        metric.processWith(this, subEntry.getKey(), timestamp);
+                    } catch (Exception ignored) {
+                        LOG.error("Error printing regular metrics:", ignored);
+                    }
+                }
+            }
+        }
+    }
+
+
+    private void sendVMMetrics(Date timestamp) {
+        List<Dimension> dimensions = new ArrayList<Dimension>();
+        for (DimensionAdder adder : dimensionAdders) {
+            dimensions.addAll(adder.generateJVMDimensions());
+        }
+        if (sendJVMMemory) {
+            sendValue(timestamp, "jvm.memory.heap_usage", vm.heapUsage(), StandardUnit.Percent, dimensions);
+            sendValue(timestamp, "jvm.memory.non_heap_usage", vm.nonHeapUsage(), StandardUnit.Percent, dimensions);
+        }
+
+        if (sendJVMThreads) {
+            sendValue(timestamp, "jvm.thread_count", vm.threadCount(), StandardUnit.Count, dimensions);
+            sendValue(timestamp, "jvm.daemon_thread_count", vm.daemonThreadCount(), StandardUnit.Count, dimensions);
+            for (Map.Entry<Thread.State, Double> entry : vm.threadStatePercentages().entrySet()) {
+                sendValue(timestamp, "jvm.thread-states." + entry.getKey().toString().toLowerCase(), entry.getValue(), StandardUnit.Count, dimensions);
+            }
+        }
+
+        if (sendJVMGC) {
+            for (Map.Entry<String, VirtualMachineMetrics.GarbageCollectorStats> entry : vm.garbageCollectors().entrySet()) {
+                sendValue(timestamp, "jvm.gc." + entry.getKey() + ".time", entry.getValue().getTime(TimeUnit.MILLISECONDS), StandardUnit.Milliseconds, dimensions);
+                sendValue(timestamp, "jvm.gc." + entry.getKey() + ".runs", entry.getValue().getRuns(), StandardUnit.Count, dimensions);
+            }
+        }
+    }
+
+    private List<Dimension> createDimensions(MetricName name, Metric metric) {
+        List<Dimension> dimensions = new ArrayList<Dimension>();
+        for (DimensionAdder adder : dimensionAdders) {
+            dimensions.addAll(adder.generate(name, metric));
+        }
+        return dimensions;
     }
 
     private String sanitizeName(MetricName name) {
