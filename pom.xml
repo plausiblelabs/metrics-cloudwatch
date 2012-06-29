@@ -8,7 +8,7 @@
     <artifactId>metrics-cloudwatch</artifactId>
     <version>2.1-SNAPSHOT</version>
 
-    <name>Metrics Cloudwatch Support</name>
+    <name>Metrics for CloudWatch</name>
     <packaging>jar</packaging>
 
     <dependencies>
