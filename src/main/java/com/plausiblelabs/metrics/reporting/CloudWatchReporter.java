@@ -104,7 +104,7 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
             return this;
         }
 
-        public Enabler withGC(boolean enabled) {
+        public Enabler withJVMGC(boolean enabled) {
             this.sendGC = enabled;
             return this;
         }
@@ -382,7 +382,7 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         Snapshot snapshot = histogram.getSnapshot();
         for (double percentile : percentilesToSend) {
             if (percentile == .5) {
-                sendValue(context, sanitizedName + "_median", snapshot.getMedian(), StandardUnit.None, dimensions);
+                sendValue(context, sanitizedName + ".median", snapshot.getMedian(), StandardUnit.None, dimensions);
             } else {
                 sendValue(context, sanitizedName + "_percentile_" + percentile, snapshot.getValue(percentile), StandardUnit.None, dimensions);
             }
@@ -450,10 +450,10 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
             }
         }
         if (sendTimerLifetime) {
-            sendValue(context, name + ".min", convertIfNecessary(timer.min(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
-            sendValue(context, name + ".max", convertIfNecessary(timer.max(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
-            sendValue(context, name + ".mean", convertIfNecessary(timer.mean(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
-            sendValue(context, name + ".stddev", convertIfNecessary(timer.stdDev(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+            sendValue(context, sanitizedName + ".min", convertIfNecessary(timer.min(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+            sendValue(context, sanitizedName + ".max", convertIfNecessary(timer.max(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+            sendValue(context, sanitizedName + ".mean", convertIfNecessary(timer.mean(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
+            sendValue(context, sanitizedName + ".stddev", convertIfNecessary(timer.stdDev(), recordedUnit, sendUnit), cloudWatchUnit, dimensions);
         }
     }
 
