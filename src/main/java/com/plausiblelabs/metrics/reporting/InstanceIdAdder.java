@@ -22,7 +22,7 @@ import com.yammer.metrics.core.Metric;
 import com.yammer.metrics.core.MetricName;
 import com.yammer.metrics.core.MetricPredicate;
 
-public class InstanceIdAdder implements DimensionAdder {
+class InstanceIdAdder implements DimensionAdder {
     private static final Logger LOG = LoggerFactory.getLogger(InstanceIdAdder.class);
 
     private final MetricPredicate predicate;

@@ -34,9 +34,18 @@ import com.yammer.metrics.core.VirtualMachineMetrics;
 import com.yammer.metrics.reporting.AbstractPollingReporter;
 import com.yammer.metrics.stats.Snapshot;
 
+/**
+ * Reports metrics to <a href="http://aws.amazon.com/cloudwatch/">Amazon's CloudWatch</a> periodically.
+ */
 public class CloudWatchReporter extends AbstractPollingReporter implements MetricProcessor<Date> {
     private static final Logger LOG = LoggerFactory.getLogger(CloudWatchReporter.class);
 
+    /**
+     * <p>Creates or starts a CloudWatchReporter.</p>
+     * <p>As CloudWatch charges 50 cents per unique metric, this reporter attempts to be parsimonious with the values
+     * it sends by default. It only sends the median, 95th, and 99th percentiles for histograms and timers, and the
+     * one minute rate for meters and timers. Additional metrics may be sent through configuring this class.</p>
+     */
     public static class Enabler {
         private final String namespace;
         private final AmazonCloudWatchClient client;
@@ -59,108 +68,228 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         private boolean sendJVMThreadState;
         private boolean sendGC;
 
-        public Enabler withPercentiles(double...percentiles) {
-            this.percentilesToSend = percentiles;
-            return this;
-        }
-
-        public Enabler withOneMinuteRate(boolean enabled) {
-            this.sendOneMinute = enabled;
-            return this;
-        }
-
-        public Enabler withFiveMinuteRate(boolean enabled) {
-            this.sendFiveMinute = enabled;
-            return this;
-        }
-
-        public Enabler withFifteenMinuteRate(boolean enabled) {
-            this.sendFifteenMinute = enabled;
-            return this;
-        }
-
-        public Enabler withMeterSummary(boolean enabled) {
-            this.sendMeterSummary = enabled;
-            return this;
-        }
-
-        public Enabler withTimerSummary(boolean enabled) {
-            this.sendTimerLifetime = enabled;
-            return this;
-        }
-
-        public Enabler withHistogramSummary(boolean enabled) {
-            this.sendHistoLifetime = enabled;
-            return this;
-        }
-
-        public Enabler withJVMMemory(boolean enabled) {
-            this.sendJVMMemory = enabled;
-            return this;
-        }
-
-        public Enabler withJVMThreadState(boolean enabled) {
-            this.sendJVMThreadState = enabled;
-            return this;
-        }
-
-        public Enabler withJVMGC(boolean enabled) {
-            this.sendGC = enabled;
-            return this;
-        }
-
+        /**
+         * Creates an Enabler that sends values in the given namespace to the given AWS account
+         *
+         * @param namespace the namespace. Must be non-null and not empty.
+         */
         public Enabler(String namespace, AWSCredentials creds) {
             this(namespace, new AmazonCloudWatchClient(creds));
         }
 
+        /**
+         * Creates an Enabler that sends values in the given namespace using the given client
+         *
+         * @param namespace the namespace. Must be non-null and not empty.
+         */
         public Enabler(String namespace, AmazonCloudWatchClient client) {
             this.namespace = namespace;
             this.client = client;
         }
 
+        /**
+         * <p>The histogram and meter percentiles to send. If <code>.5</code> is included, it'll be reported as
+         * <code>median</code>.This defaults to <code>.5, .95, and .99</code>.
+         * @param percentiles the percentiles to send. Replaces the currently set percentiles.
+         * @return this Enabler.
+         */
+        public Enabler withPercentiles(double...percentiles) {
+            this.percentilesToSend = percentiles;
+            return this;
+        }
+
+        /**
+         * If the one minute rate should be sent for meters and timers. Enabled by default.
+         * @param enabled if the rate should be sent.
+         * @return this Enabler.
+         */
+        public Enabler withOneMinuteRate(boolean enabled) {
+            this.sendOneMinute = enabled;
+            return this;
+        }
+
+
+        /**
+         * If the five minute rate should be sent for meters and timers. Disabled by default.
+         * @param enabled if the rate should be sent.
+         * @return this Enabler.
+         */
+        public Enabler withFiveMinuteRate(boolean enabled) {
+            this.sendFiveMinute = enabled;
+            return this;
+        }
+
+        /**
+         * If the fifteen minute rate should be sent for meters and timers. Disabled by default.
+         * @param enabled if the rate should be sent.
+         * @return this Enabler.
+         */
+        public Enabler withFifteenMinuteRate(boolean enabled) {
+            this.sendFifteenMinute = enabled;
+            return this;
+        }
+
+        /**
+         * If the lifetime value summary should be sent for meters ie count and mean rate. Disabled by default.
+         * @param enabled if the summary should be sent.
+         * @return this Enabler.
+         */
+        public Enabler withMeterSummary(boolean enabled) {
+            this.sendMeterSummary = enabled;
+            return this;
+        }
+
+        /**
+         * If the lifetime value summary should be sent for timers ie min, max, mean, and count. Disabled by default.
+         * @param enabled if the summary should be sent.
+         * @return this Enabler.
+         */
+        public Enabler withTimerSummary(boolean enabled) {
+            this.sendTimerLifetime = enabled;
+            return this;
+        }
+
+        /**
+         * If the lifetime value summary should be sent for histograms ie min, max, mean, and count. Disabled by default.
+         * @param enabled if the summary should be sent.
+         * @return this Enabler.
+         */
+        public Enabler withHistogramSummary(boolean enabled) {
+            this.sendHistoLifetime = enabled;
+            return this;
+        }
+
+        /**
+         * If JVM memory heap and permgen values should be sent. Enabled by default
+         * @param enabled if the values should be sent
+         * @return this Enabler.
+         */
+        public Enabler withJVMMemory(boolean enabled) {
+            this.sendJVMMemory = enabled;
+            return this;
+        }
+
+        /**
+         * If JVM thread counts and states should be sent. Disabled by default.
+         * @param enabled if the values should be sent
+         * @return this Enabler.
+         */
+        public Enabler withJVMThreadState(boolean enabled) {
+            this.sendJVMThreadState = enabled;
+            return this;
+        }
+
+        /**
+         * If JVM memory garbage collection statistics should be sent. Disabled by default.
+         * @param enabled if the values should be sent
+         * @return this Enabler.
+         */
+        public Enabler withJVMGC(boolean enabled) {
+            this.sendGC = enabled;
+            return this;
+        }
+
+        /**
+         * Use the given registry to fetch metrics. Defaults to <code>Metrics.defaultRegistry()</code>
+         * @return this Enabler.
+         */
         public Enabler withRegistry(MetricsRegistry registry) {
             this.registry = registry;
             return this;
         }
 
+
+        /**
+         * Filters to metrics to send through the given predicate. Only matching metrics will be sent.
+         * @return this Enabler.
+         */
         public Enabler withPredicate(MetricPredicate predicate) {
             this.predicate = predicate;
             return this;
         }
 
+        /**
+         * The delay betwen metric sends if this enabler starts a reporter with <code>enable</code>. Defaults to 1 minute.
+         * @param period the time between sends
+         * @param unit the unit of the time
+         * @return this Enabler.
+         */
         public Enabler withDelay(long period, TimeUnit unit) {
             this.period = period;
             this.unit = unit;
             return this;
         }
 
+        /**
+         * <p>Adds an <code>InstanceId</code> dimension to all sent metrics with EC2 instance's id. The id isfetched
+         * from the EC2 metadata server at <code>http://169.254.169.254/latest/meta-data/instance-id</code>.</p>
+         *
+         * <p>This will only work if running inside EC2. If used outside of EC2, or if the service fails, an
+         * <code>InstanceId</code> dimenson with the value <code>unknown</code> will be sent.</p>
+         *
+         * @return this Enabler.
+         */
         public Enabler withEC2InstanceIdDimension() {
             return withEC2InstanceIdDimension(MetricPredicate.ALL);
         }
 
+        /**
+         * <p>Adds an <code>InstanceId</code> dimension to all metrics matching the given predicate. The instance id
+         * fetched from the EC2 metadata server at <code>http://169.254.169.254/latest/meta-data/instance-id</code>.</p>
+         *
+         * <p>This will only work if running inside EC2. If used outside of EC2, or if the service fails, an
+         * <code>InstanceId</code> dimenson with the value <code>unknown</code> will be sent.</p>
+         *
+         * @return this Enabler.
+         */
         public Enabler withEC2InstanceIdDimension(MetricPredicate predicate) {
             return withDimensionAdder(new InstanceIdAdder(predicate));
         }
 
+        /**
+         * <p>Adds an <code>InstanceId</code> dimension to all metrics with the given instance id as a value.</p>
+         *
+         * @return this Enabler.
+         */
         public Enabler withInstanceIdDimension(String instanceId) {
             return withInstanceIdDimension(instanceId, MetricPredicate.ALL);
         }
 
+        /**
+         * <p>Adds an <code>InstanceId</code> dimension to all metrics matching the given predicate with the given
+         * instance id as a value.</p>
+         *
+         * @return this Enabler.
+         */
         public Enabler withInstanceIdDimension(String instanceId, MetricPredicate predicate) {
             return withDimensionAdder(new InstanceIdAdder(predicate, instanceId));
         }
 
+        /**
+         * Runs the given adder on all sent metrics. Note: a single metric may have a maximum of 10 dimensions.
+         *
+         * @return this Enabler.
+         */
         public Enabler withDimensionAdder(DimensionAdder adder) {
             this.dimensionAdders.add(adder);
             return this;
         }
 
+        /**
+         * If metrics will be sent to CloudWatch. Enabled by default. If disabled, the metrics that would be sent are
+         * logged instead. It's useful to disable CloudWatch and see if the expected metrics are being sent before
+         * incurring the monthly charge.
+         *
+         * @return this Enabler.
+         */
         public Enabler withCloudWatchEnabled(boolean enabled) {
             sendToCloudWatch = enabled;
             return this;
         }
 
-
+        /**
+         * Creates a reporter with the settings currently configured on this enabler.
+         */
         public CloudWatchReporter build() {
             return new CloudWatchReporter(registry, namespace, client, predicate, dimensionAdders,
                                           sendToCloudWatch, percentilesToSend, sendOneMinute, sendFiveMinute,
@@ -168,6 +297,9 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
                                           sendJVMMemory, sendJVMThreadState, sendGC);
         }
 
+        /**
+         * Starts a CloudWatchReporter with the settings currently configured on this enabler at the period set on it.
+         */
         public void enable() {
             try {
                 build().start(period, unit);
