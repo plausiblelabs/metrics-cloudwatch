@@ -4,12 +4,42 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <parent>
+      <groupId>org.sonatype.oss</groupId>
+      <artifactId>oss-parent</artifactId>
+      <version>7</version>
+    </parent>
+
     <groupId>com.plausiblelabs.metrics</groupId>
     <artifactId>metrics-cloudwatch</artifactId>
-    <version>2.1-SNAPSHOT</version>
+    <version>2.1.2-SNAPSHOT</version>
+    <packaging>jar</packaging>
 
     <name>Metrics for CloudWatch</name>
-    <packaging>jar</packaging>
+    <description>Sends Metrics data to Amazon's CloudWatch</description>
+    <url>https://github.com/plausiblelabs/metrics-cloudwatch</url>
+
+    <licenses>
+      <license>
+        <name>Apache License 2.0</name>
+        <url>http://www.apache.org/licenses/LICENSE-2.0.html</url>
+        <distribution>repo</distribution>
+      </license>
+    </licenses>
+
+    <scm>
+      <connection>scm:git:git://github.com/plausiblelabs/metrics-cloudwatch.git</connection>
+      <developerConnection>scm:git:git@github.com:plausiblelabs/metrics-cloudwatch.git</developerConnection>
+      <url>https://github.com/plausiblelabs/metrics-cloudwatch/</url>
+    </scm>
+
+    <developers>
+      <developer>
+        <name>Charlie Groves</name>
+        <email>charlie.groves@gmail.com</email>
+        <timezone>-8</timezone>
+      </developer>
+    </developers>
 
     <dependencies>
         <dependency>
