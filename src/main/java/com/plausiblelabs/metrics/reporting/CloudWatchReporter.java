@@ -1,18 +1,5 @@
 package com.plausiblelabs.metrics.reporting;
 
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.SortedMap;
-import java.util.concurrent.TimeUnit;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatchClient;
 import com.amazonaws.services.cloudwatch.model.Dimension;
@@ -33,6 +20,18 @@ import com.yammer.metrics.core.Timer;
 import com.yammer.metrics.core.VirtualMachineMetrics;
 import com.yammer.metrics.reporting.AbstractPollingReporter;
 import com.yammer.metrics.stats.Snapshot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Reports metrics to <a href="http://aws.amazon.com/cloudwatch/">Amazon's CloudWatch</a> periodically.
@@ -375,10 +374,17 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     }
 
     private void sendToCloudWatch() {
-        if (sendToCloudWatch && !putReq.getMetricData().isEmpty()) {
-            client.putMetricData(putReq);
+        try {
+            if (sendToCloudWatch && !putReq.getMetricData().isEmpty()) {
+                client.putMetricData(putReq);
+            }
+        } catch (RuntimeException re) {
+            LOG.warn("Failed writing to CloudWatch: {}", putReq);
+            throw re;
+        } finally {
+            // Be sure the putReq cleared; a failure indicates bad data, so we don't want to try again
+            putReq = new PutMetricDataRequest().withNamespace(namespace);
         }
-        putReq = new PutMetricDataRequest().withNamespace(namespace);
     }
 
     private void sendValue(Date timestamp, String name, double value, StandardUnit unit, List<Dimension> dimensions) {
