@@ -40,6 +40,20 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     private static final Logger LOG = LoggerFactory.getLogger(CloudWatchReporter.class);
 
     /**
+     * Amazon's docs say they don't accept values smaller than 1E-130, but experimentally 1E-108 is the smallest
+     * accepted value. Metric values smaller than this will be trimmed to this value and a debug log will be printed the
+     * first time it happens in the reporter.
+     */
+    static final double SMALLEST_SENDABLE = 1E-108;
+
+    /**
+     * Amazon's docs say they don't accept values larger than 1E116, but experimentally 1E108 is the smallest
+     * accepted value. Metric values larger than this will be trimmed to this value and a debug log will be printed the
+     * first time it happens in the reporter.
+     */
+    static final double LARGEST_SENDABLE = 1E108;
+
+    /**
      * <p>Creates or starts a CloudWatchReporter.</p>
      * <p>As CloudWatch charges 50 cents per unique metric, this reporter attempts to be parsimonious with the values
      * it sends by default. It only sends the median, 95th, and 99th percentiles for histograms and timers, and the
@@ -387,7 +401,31 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         }
     }
 
+    private boolean sentTooSmall, sentTooLarge;
+
     private void sendValue(Date timestamp, String name, double value, StandardUnit unit, List<Dimension> dimensions) {
+        double absValue = Math.abs(value);
+        if (absValue < SMALLEST_SENDABLE) {
+            if (value < 0) {
+                value = -SMALLEST_SENDABLE;
+            } else {
+                value = SMALLEST_SENDABLE;
+            }
+            if (!sentTooSmall) {
+                LOG.debug("Value for {} is smaller than what CloudWatch supports; trimming to {}. Further small values won't be logged.", name, value);
+                sentTooSmall = true;
+            }
+        } else if (absValue > LARGEST_SENDABLE) {
+            if (value < 0) {
+                value = -LARGEST_SENDABLE;
+            } else {
+                value = LARGEST_SENDABLE;
+            }
+            if (!sentTooLarge) {
+                LOG.debug("Value for {} is larger than what CloudWatch supports; trimming to {}. Further large values won't be logged.", name, value);
+                sentTooLarge = true;
+            }
+        }
         // TODO limit to 10 dimensions
         MetricDatum datum = new MetricDatum()
             .withTimestamp(timestamp)

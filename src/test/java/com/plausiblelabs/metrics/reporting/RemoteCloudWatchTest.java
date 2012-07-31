@@ -4,18 +4,19 @@
 
 package com.plausiblelabs.metrics.reporting;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.Test;
-
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.PropertiesCredentials;
 import com.google.common.io.Resources;
 import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Gauge;
+import com.yammer.metrics.core.MetricName;
 import com.yammer.metrics.core.Timer;
+import org.junit.Test;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.util.concurrent.TimeUnit;
 
 public class RemoteCloudWatchTest {
     @Test
@@ -30,6 +31,30 @@ public class RemoteCloudWatchTest {
                 timer.update(i, TimeUnit.MINUTES);
             }
         }
+        Metrics.newGauge(new MetricName("test", "limits", "NegSmall"), new Gauge<Double>() {
+            @Override
+            public Double value() {
+                return 1E-109;
+            }
+        });
+        Metrics.newGauge(new MetricName("test", "limits", "PosSmall"), new Gauge<Double>() {
+            @Override
+            public Double value() {
+                return 1E-109;
+            }
+        });
+        Metrics.newGauge(new MetricName("test", "limits", "NegLarge"), new Gauge<Double>() {
+            @Override
+            public Double value() {
+                return CloudWatchReporter.LARGEST_SENDABLE * 10;
+            }
+        });
+        Metrics.newGauge(new MetricName("test", "limits", "PosLarge"), new Gauge<Double>() {
+            @Override
+            public Double value() {
+                return -CloudWatchReporter.LARGEST_SENDABLE * 10;
+            }
+        });
         new CloudWatchReporter.Enabler("cxabf", creds)
             .withInstanceIdDimension("test").build().run();
 
