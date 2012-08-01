@@ -406,14 +406,16 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
     private void sendValue(Date timestamp, String name, double value, StandardUnit unit, List<Dimension> dimensions) {
         double absValue = Math.abs(value);
         if (absValue < SMALLEST_SENDABLE) {
-            if (value < 0) {
-                value = -SMALLEST_SENDABLE;
-            } else {
-                value = SMALLEST_SENDABLE;
-            }
-            if (!sentTooSmall) {
-                LOG.debug("Value for {} is smaller than what CloudWatch supports; trimming to {}. Further small values won't be logged.", name, value);
-                sentTooSmall = true;
+            if (absValue > 0) {// Allow 0 through untouched, everything else gets rounded to SMALLEST_SENDABLE
+                if (value < 0) {
+                    value = -SMALLEST_SENDABLE;
+                } else {
+                    value = SMALLEST_SENDABLE;
+                }
+                if (!sentTooSmall) {
+                    LOG.debug("Value for {} is smaller than what CloudWatch supports; trimming to {}. Further small values won't be logged.", name, value);
+                    sentTooSmall = true;
+                }
             }
         } else if (absValue > LARGEST_SENDABLE) {
             if (value < 0) {

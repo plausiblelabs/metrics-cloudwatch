@@ -34,7 +34,7 @@ public class RemoteCloudWatchTest {
         Metrics.newGauge(new MetricName("test", "limits", "NegSmall"), new Gauge<Double>() {
             @Override
             public Double value() {
-                return 1E-109;
+                return -1E-109;
             }
         });
         Metrics.newGauge(new MetricName("test", "limits", "PosSmall"), new Gauge<Double>() {
