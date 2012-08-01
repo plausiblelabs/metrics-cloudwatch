@@ -46,13 +46,13 @@ public class RemoteCloudWatchTest {
         Metrics.newGauge(new MetricName("test", "limits", "NegLarge"), new Gauge<Double>() {
             @Override
             public Double value() {
-                return CloudWatchReporter.LARGEST_SENDABLE * 10;
+                return -CloudWatchReporter.LARGEST_SENDABLE * 10;
             }
         });
         Metrics.newGauge(new MetricName("test", "limits", "PosLarge"), new Gauge<Double>() {
             @Override
             public Double value() {
-                return -CloudWatchReporter.LARGEST_SENDABLE * 10;
+                return CloudWatchReporter.LARGEST_SENDABLE * 10;
             }
         });
         new CloudWatchReporter.Enabler("cxabf", creds)
