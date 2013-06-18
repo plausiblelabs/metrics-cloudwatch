@@ -101,6 +101,17 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         }
 
         /**
+         * Sets the endpoint for the AmazonCloudWatchClient
+         *
+         * @param endpoint the region specific endpoint url. Must be non-null and not empty.
+         * @return this Enabler.
+         */
+        public Enabler withEndpoint(String endpoint) {
+            this.client.setEndpoint(endpoint);
+            return this;
+        }
+
+        /**
          * <p>The histogram and meter percentiles to send. If <code>.5</code> is included, it'll be reported as
          * <code>median</code>.This defaults to <code>.5, .95, and .99</code>.
          * @param percentiles the percentiles to send. Replaces the currently set percentiles.
@@ -401,7 +412,7 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         }
     }
 
-    private boolean sentTooSmall, sentTooLarge;
+    private boolean sentTooSmall, sentTooLarge, sentNaN;
 
     private void sendValue(Date timestamp, String name, double value, StandardUnit unit, List<Dimension> dimensions) {
         double absValue = Math.abs(value);
@@ -427,7 +438,14 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
                 LOG.debug("Value for {} is larger than what CloudWatch supports; trimming to {}. Further large values won't be logged.", name, value);
                 sentTooLarge = true;
             }
+        } else if (Double.isNaN(value)) {
+            if (!sentNaN) {
+                LOG.debug("Value for {} is NaN; setting to 0. Further NaN values won't be logged.", name, value);
+                sentNaN = true;
+            }
+            value = 0;
         }
+
         // TODO limit to 10 dimensions
         MetricDatum datum = new MetricDatum()
             .withTimestamp(timestamp)
