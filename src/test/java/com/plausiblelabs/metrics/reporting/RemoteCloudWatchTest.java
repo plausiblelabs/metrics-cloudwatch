@@ -55,6 +55,12 @@ public class RemoteCloudWatchTest {
                 return CloudWatchReporter.LARGEST_SENDABLE * 10;
             }
         });
+        Metrics.newGauge(new MetricName("test", "limits", "NaN"), new Gauge<Double>() {
+            @Override
+            public Double value() {
+                return Double.NaN;
+            }
+        });
         new CloudWatchReporter.Enabler("cxabf", creds).withEndpoint("monitoring.us-west-2.amazonaws.com")
             .withInstanceIdDimension("test").build().run();
 
