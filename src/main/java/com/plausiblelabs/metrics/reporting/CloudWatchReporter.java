@@ -101,6 +101,17 @@ public class CloudWatchReporter extends AbstractPollingReporter implements Metri
         }
 
         /**
+         * Sets the endpoint for the AmazonCloudWatchClient
+         *
+         * @param endpoint the region specific endpoint url. Must be non-null and not empty.
+         * @return this Enabler.
+         */
+        public Enabler withEndpoint(String endpoint) {
+            this.client.setEndpoint(endpoint);
+            return this;
+        }
+
+        /**
          * <p>The histogram and meter percentiles to send. If <code>.5</code> is included, it'll be reported as
          * <code>median</code>.This defaults to <code>.5, .95, and .99</code>.
          * @param percentiles the percentiles to send. Replaces the currently set percentiles.

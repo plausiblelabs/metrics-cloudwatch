@@ -23,7 +23,8 @@ public class CloudWatchReporterTest {
     private MetricsRegistry testRegistry = new MetricsRegistry();
     private DummyCloudWatchClient client = new DummyCloudWatchClient();
     private CloudWatchReporter.Enabler enabler =
-        new CloudWatchReporter.Enabler("testnamespace", client).withRegistry(testRegistry);
+        new CloudWatchReporter.Enabler("testnamespace", client).withRegistry(testRegistry)
+            .withEndpoint("monitoring.us-west-2.amazonaws.com");
 
     @After
     public void shutdownRegistry() {

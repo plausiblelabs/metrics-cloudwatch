@@ -55,7 +55,7 @@ public class RemoteCloudWatchTest {
                 return CloudWatchReporter.LARGEST_SENDABLE * 10;
             }
         });
-        new CloudWatchReporter.Enabler("cxabf", creds)
+        new CloudWatchReporter.Enabler("cxabf", creds).withEndpoint("monitoring.us-west-2.amazonaws.com")
             .withInstanceIdDimension("test").build().run();
 
     }
