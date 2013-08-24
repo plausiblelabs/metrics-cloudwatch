@@ -4,14 +4,13 @@
 
 package com.plausiblelabs.metrics.reporting;
 
+import com.amazonaws.services.cloudwatch.model.Dimension;
+import com.codahale.metrics.Metric;
+
 import java.util.Collection;
 
-import com.amazonaws.services.cloudwatch.model.Dimension;
-import com.yammer.metrics.core.Metric;
-import com.yammer.metrics.core.MetricName;
-
 /**
- * Adds CloudWatch dimensions to sent metrics.  See {@link CloudWatchReporter.Enabler#withDimensionAdder} to use.
+ * Adds CloudWatch dimensions to sent metrics.  See {@link com.plausiblelabs.metrics.reporting.CloudWatchReporter.Builder#withDimensionAdder} to use.
  */
 public interface DimensionAdder {
     /**
@@ -21,7 +20,7 @@ public interface DimensionAdder {
      * @param metric the metric
      * @return dimensions to add to the metric's values in CloudWatch
      */
-    Collection<Dimension> generate(MetricName name, Metric metric);
+    Collection<Dimension> generate(String name, Metric metric);
 
     /**
      * Return dimensions to be added to JVM metrics. May conditionally return no dimensions if not all metrics

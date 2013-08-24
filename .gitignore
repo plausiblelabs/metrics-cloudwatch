@@ -1,1 +1,6 @@
 src/test/resources/aws_creds.properties
+target
+metrics-cloudwatch.iws
+metrics-cloudwatch.iml
+metrics-cloudwatch.ipr
+.idea
