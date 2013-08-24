@@ -10,7 +10,7 @@
 
     <groupId>com.plausiblelabs.metrics</groupId>
     <artifactId>metrics-cloudwatch</artifactId>
-    <version>2.1.2.3-SNAPSHOT</version>
+    <version>3.0.1-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>Metrics for CloudWatch</name>
@@ -31,6 +31,10 @@
       <url>https://github.com/plausiblelabs/metrics-cloudwatch/</url>
     </scm>
 
+    <properties>
+            <metrics.version>3.0.1</metrics.version>
+    </properties>
+
     <developers>
       <developer>
         <name>Charlie Groves</name>
@@ -41,9 +45,9 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.yammer.metrics</groupId>
+            <groupId>com.codahale.metrics</groupId>
             <artifactId>metrics-core</artifactId>
-            <version>2.1.2</version>
+            <version>${metrics.version}</version>
             <type>jar</type>
             <scope>compile</scope>
         </dependency>
@@ -68,13 +72,13 @@
             <version>1.6.4</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>com.yammer.metrics</groupId>
-            <artifactId>metrics-core</artifactId>
-            <version>2.1.2</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
+        <!--<dependency>-->
+            <!--<groupId>com.codahale.metrics</groupId>-->
+            <!--<artifactId>metrics-core</artifactId>-->
+            <!--<version>${metrics.version}</version>-->
+            <!--<type>test-jar</type>-->
+            <!--<scope>test</scope>-->
+        <!--</dependency>-->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
